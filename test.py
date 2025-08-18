@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 
 # =====================
 # Page Setup
@@ -78,6 +79,16 @@ for i, (color_name, info) in enumerate(color_data.items()):
         if st.button(color_name):
             st.session_state["selected_color"] = color_name
             selected_color = color_name
+            # 클릭 강조 애니메이션 (간단한 플래시 효과)
+            st.markdown(f"""
+            <script>
+            const btns = window.parent.document.querySelectorAll("button:contains('{color_name}')");
+            btns.forEach(btn => {{
+                btn.style.transform = "scale(1.2)";
+                setTimeout(()=>{{ btn.style.transform = "scale(1)"; }}, 200);
+            }});
+            </script>
+            """, unsafe_allow_html=True)
 
         # 버튼 스타일
         st.markdown(f"""
@@ -90,6 +101,10 @@ for i, (color_name, info) in enumerate(color_data.items()):
             font-size: 16px;
             font-weight: bold;
             margin-bottom: 10px;
+            transition: transform 0.2s;
+        }}
+        div.stButton > button:contains("{color_name}"):hover {{
+            transform: scale(1.1);
         }}
         </style>
         """, unsafe_allow_html=True)
@@ -106,11 +121,12 @@ if selected_color:
     .stApp {{
         background-color: {info['hex']};
         color: {"#000000" if selected_color in ['노랑','청록','주황'] else "#FFFFFF"};
+        transition: background-color 0.5s ease;
     }}
     </style>
     """, unsafe_allow_html=True)
 
-    # 카드형 결과
+    # 카드형 결과 + fade-in 애니메이션
     st.markdown(f"""
     <div style="
         background-color: rgba(255,255,255,0.15);
@@ -119,6 +135,7 @@ if selected_color:
         box-shadow: 8px 8px 30px rgba(0,0,0,0.4);
         margin-top: 20px;
         border: 2px solid rgba(255,255,255,0.3);
+        animation: fadeIn 1s ease-in;
     ">
         <h2 style='text-align:center;'>🎯 선택 색상: {selected_color}</h2>
         <h3>💡 심리/성격</h3>
@@ -130,4 +147,11 @@ if selected_color:
         <h3>💼 직업 적합성</h3>
         <p>{info['career']}</p>
     </div>
+
+    <style>
+    @keyframes fadeIn {{
+        from {{opacity: 0; transform: translateY(20px);}}
+        to {{opacity: 1; transform: translateY(0);}}
+    }}
+    </style>
     """, unsafe_allow_html=True)
