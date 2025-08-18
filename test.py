@@ -67,7 +67,7 @@ color_data = {
 }
 
 # =====================
-# 선택 UI (항상 표시)
+# 선택 UI
 # =====================
 st.markdown("### 좋아하는 색을 선택하세요:")
 selected_color = st.session_state.get("selected_color", None)
@@ -89,17 +89,18 @@ for i, (color_name, info) in enumerate(color_data.items()):
             height: 60px;
             font-size: 16px;
             font-weight: bold;
+            margin-bottom: 10px;
         }}
         </style>
         """, unsafe_allow_html=True)
 
 # =====================
-# 결과 표시 (선택 후)
+# 결과 카드
 # =====================
 if selected_color:
     info = color_data[selected_color]
 
-    # 페이지 배경 변경
+    # 페이지 배경색
     st.markdown(f"""
     <style>
     .stApp {{
@@ -110,12 +111,23 @@ if selected_color:
     """, unsafe_allow_html=True)
 
     # 카드형 결과
-    st.markdown(f"## 🎯 선택 색상: {selected_color}")
-    st.markdown(f"### 💡 심리/성격")
-    st.write(info['desc'])
-    st.markdown(f"### 🎨 디자인 취향")
-    st.write(info['design'])
-    st.markdown(f"### 📚 학습 스타일")
-    st.write(info['learning'])
-    st.markdown(f"### 💼 직업 적합성")
-    st.write(info['career'])
+    st.markdown(f"""
+    <div style="
+        background-color: rgba(255,255,255,0.15);
+        padding: 25px;
+        border-radius: 25px;
+        box-shadow: 8px 8px 30px rgba(0,0,0,0.4);
+        margin-top: 20px;
+        border: 2px solid rgba(255,255,255,0.3);
+    ">
+        <h2 style='text-align:center;'>🎯 선택 색상: {selected_color}</h2>
+        <h3>💡 심리/성격</h3>
+        <p>{info['desc']}</p>
+        <h3>🎨 디자인 취향</h3>
+        <p>{info['design']}</p>
+        <h3>📚 학습 스타일</h3>
+        <p>{info['learning']}</p>
+        <h3>💼 직업 적합성</h3>
+        <p>{info['career']}</p>
+    </div>
+    """, unsafe_allow_html=True)
