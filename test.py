@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 # =============================
@@ -60,28 +60,13 @@ st.markdown(THEME_CSS, unsafe_allow_html=True)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 }
+KST = timezone(timedelta(hours=9))
+TODAY = datetime.now(KST)
 
 @st.cache_data(ttl=900)
 def fetch_kbo_standings() -> pd.DataFrame:
     """Fetch current KBO standings (top 10) via pandas.read_html (no bs4)."""
-    # Primary: Naver Sports standings
-    try:
-        url = "https://sports.news.naver.com/kbaseball/record/index?category=kbo"
-        html = requests.get(url, headers=HEADERS, timeout=10).text
-        tables = pd.read_html(html)
-        # Pick the first non-empty dataframe that looks like standings
-        for df in tables:
-            if df.shape[1] >= 6 and any(str(c).find("승")>-1 or str(c).lower().find("w")>-1 for c in df.columns):
-                # Normalize common columns
-                df = df.rename(columns={
-                    df.columns[0]: "순위",
-                })
-                # Keep first 10 rows only
-                df = df.head(10)
-                return df
-    except Exception:
-        pass
-    # Fallback: KBO ENG standings
+    # Primary: KBO ENG
     try:
         url2 = "https://eng.koreabaseball.com/Standings/TeamStandings.aspx"
         html2 = requests.get(url2, headers=HEADERS, timeout=10).text
@@ -95,45 +80,73 @@ def fetch_kbo_standings() -> pd.DataFrame:
                 return t
     except Exception:
         pass
+    # Fallback: Naver
+    try:
+        url = "https://sports.news.naver.com/kbaseball/record/index?category=kbo"
+        html = requests.get(url, headers=HEADERS, timeout=10).text
+        tables = pd.read_html(html)
+        for df in tables:
+            if df.shape[1] >= 6:
+                df = df.head(10)
+                df.rename(columns={df.columns[0]:"순위"}, inplace=True)
+                return df
+    except Exception:
+        pass
+    # Fallback: MyKBO
+    try:
+        url3 = "https://mykbostats.com/standings"
+        html3 = requests.get(url3, headers=HEADERS, timeout=10).text
+        tables3 = pd.read_html(html3)
+        for df in tables3:
+            if df.shape[1] >= 6:
+                df = df.head(10)
+                df.rename(columns={df.columns[0]:"순위"}, inplace=True)
+                return df
+    except Exception:
+        pass
     return pd.DataFrame()
 
-@st.cache_data(ttl=900)
-def month_list(center: datetime, back: int = 1, ahead: int = 2):
-    months = []
-    base = datetime(center.year, center.month, 1)
-    for d in range(-back, ahead+1):
-        m = base.month + d
-        y = base.year + (m-1)//12
-        m = (m-1)%12 + 1
-        months.append((y, m))
-    return months
-
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=1200)
 def fetch_schedule_kia(months_back: int = 1, months_ahead: int = 2) -> pd.DataFrame:
-    """Fetch KBO monthly schedules from Naver and filter rows containing KIA.
-       Uses pandas.read_html only. Returns concatenated dataframe for multiple months.
-    """
+    """Fetch KIA schedule from multiple monthly sources (no bs4)."""
     rows = []
-    today = datetime.today()
-    for (y, m) in month_list(today, months_back, months_ahead):
-        month_str = f"{y}-{m:02d}"
+    # 1) Naver monthly schedule
+    for m_offset in range(-months_back, months_ahead+1):
+        dt = (TODAY.replace(day=1) + timedelta(days=31*m_offset)).replace(day=1)
+        month_str = f"{dt.year}-{dt.month:02d}"
         try:
             url = f"https://sports.news.naver.com/kbaseball/schedule/index?month={month_str}&category=kbo"
             html = requests.get(url, headers=HEADERS, timeout=10).text
             tables = pd.read_html(html)
-            # Many monthly tables; concatenate and filter
             for t in tables:
-                # Try to find rows where any cell mentions KIA
-                mask = t.applymap(lambda x: isinstance(x, str) and ("KIA" in x or "기아" in x)).any(axis=1)
-                kia_rows = t[mask].copy()
+                # Normalize all cells to string then filter
+                t = t.applymap(lambda x: str(x) if not isinstance(x, str) else x)
+                mask = t.apply(lambda r: any("KIA" in c or "기아" in c for c in r), axis=1)
+                kia_rows = t[mask]
                 if not kia_rows.empty:
                     kia_rows.insert(0, "월", month_str)
                     rows.append(kia_rows)
         except Exception:
-            continue
+            pass
+    # 2) STATIZ monthly schedule (fallback)
+    if not rows:
+        for m_offset in range(-months_back, months_ahead+1):
+            dt = (TODAY.replace(day=1) + timedelta(days=31*m_offset)).replace(day=1)
+            try:
+                url = f"https://www.statiz.co.kr/schedule.php?opt=0&sopt=0&sy={dt.year}&sm={dt.month}"
+                html = requests.get(url, headers=HEADERS, timeout=10).text
+                tables = pd.read_html(html)
+                for t in tables:
+                    t = t.applymap(lambda x: str(x) if not isinstance(x, str) else x)
+                    mask = t.apply(lambda r: any("KIA" in c or "기아" in c for c in r), axis=1)
+                    kia_rows = t[mask]
+                    if not kia_rows.empty:
+                        kia_rows.insert(0, "월", f"{dt.year}-{dt.month:02d}")
+                        rows.append(kia_rows)
+            except Exception:
+                pass
     if rows:
         out = pd.concat(rows, ignore_index=True)
-        # Try to standardize columns
         out.columns = [str(c) for c in out.columns]
         return out
     return pd.DataFrame()
@@ -156,7 +169,7 @@ def wikipedia_thumb(person_name: str, size: int = 240) -> str:
                 return thumb
     except Exception:
         pass
-    # fallback generic tiger icon
+    # fallback generic icon
     return "https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/Question_book-new.svg/240px-Question_book-new.svg.png"
 
 # ====================
@@ -194,17 +207,21 @@ if menu == "오늘의 경기":
     with c1:
         st.markdown("### 오늘의 KIA 경기")
         sched = fetch_schedule_kia(months_back=0, months_ahead=0)
-        # Try to find rows that include today's date string
-        today_str1 = datetime.today().strftime("%m/%d")
-        today_str2 = datetime.today().strftime("%Y-%m-%d")
+        today_strs = [
+            TODAY.strftime("%m/%d"),
+            TODAY.strftime("%Y-%m-%d"),
+            TODAY.strftime("%Y.%m.%d"),
+            TODAY.strftime("%m.%d"),
+            TODAY.strftime("%-m/%-d") if hasattr(TODAY, 'strftime') else TODAY.strftime("%m/%d"),
+        ]
         today_rows = pd.DataFrame()
         if not sched.empty:
-            today_rows = sched[sched.apply(lambda r: any(today_str1 in str(x) or today_str2 in str(x) for x in r), axis=1)]
+            today_rows = sched[sched.apply(lambda r: any(ts in " ".join(map(str, r.values)) for ts in today_strs), axis=1)]
         if not today_rows.empty:
             for _, r in today_rows.iterrows():
                 st.markdown(f"<div class='scoreboard'>{' | '.join(map(str, r.values))}</div>", unsafe_allow_html=True)
         else:
-            st.info("오늘은 KIA 경기 일정이 없거나 원본 표기 형식이 다릅니다. 아래 일정 탭에서 더 확인해 보세요.")
+            st.info("오늘 경기 정보를 찾지 못했습니다. 아래 '경기 일정' 탭에서 더 많은 일정을 확인하세요.")
     with c2:
         st.markdown("### 현재 순위 (Top 10)")
         rank = fetch_kbo_standings()
@@ -227,7 +244,6 @@ elif menu == "순위표(Top 10)":
     if df.empty:
         st.warning("순위를 불러오지 못했습니다.")
     else:
-        # Try to highlight the best win% row if column exists
         try:
             st.table(df.style.highlight_max(axis=0, subset=["승률"]))
         except Exception:
@@ -269,8 +285,8 @@ st.markdown("---")
 st.markdown(
     """
     <small>
-    데이터 출처: Naver Sports / KBO English (pandas.read_html).<br>
-    실시간 페이지 구조 변경 시 일시적으로 로드 실패할 수 있습니다.
+    데이터 출처: KBO(ENG), Naver Sports, STATIZ (pandas.read_html 사용).<br>
+    페이지 구조 변경 시 일시적으로 로드 실패할 수 있습니다.
     </small>
     """,
     unsafe_allow_html=True,
